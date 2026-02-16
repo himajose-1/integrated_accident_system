@@ -319,7 +319,8 @@ export const AppProvider = ({ children }) => {
   const submitAccidentReport = async (reportData) => {
     try {
       setLoading(true)
-      await api.createAccidentReport(reportData)
+      const response = await api.createAccidentReport(reportData)
+      console.log('✅ Report created with ID:', response?.id)
       addNotification('Accident report submitted successfully', 'success', {
         title: '✅ Report Submitted',
         details: 'Your accident report has been recorded and authorities have been notified',
@@ -334,6 +335,7 @@ export const AppProvider = ({ children }) => {
         ]
       })
       await loadAccidents()
+      return response  // Return the response so AccidentReportForm can get the report ID
     } catch (error) {
       console.error('Failed to submit report:', error)
       addNotification('Failed to submit accident report', 'error', {

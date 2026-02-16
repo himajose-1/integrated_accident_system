@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -8,6 +8,10 @@ from services.member3_realtime import realtime_service
 from models.database import TrafficReport
 from sqlalchemy import and_
 from datetime import timedelta
+import os
+import json
+from pathlib import Path
+import uuid
 
 router = APIRouter(prefix="/api/reports", tags=["Accident Reporting"])
 
@@ -219,7 +223,8 @@ async def get_accident_reports(
                         "time_of_day": r.time_of_day,
                         "traffic_density": r.traffic_density,
                         "reported_at": r.reported_at.isoformat(),
-                        "verified": r.verified
+                        "verified": r.verified,
+                        "evidence_files": json.loads(r.evidence_files) if r.evidence_files else []
                     }
                     for r in reports
                 ]
@@ -252,7 +257,8 @@ async def get_accident_report(report_id: int, db: Session = Depends(get_db)):
                 "time_of_day": report.time_of_day,
                 "traffic_density": report.traffic_density,
                 "reported_at": report.reported_at.isoformat(),
-                "verified": report.verified
+                "verified": report.verified,
+                "evidence_files": json.loads(report.evidence_files) if report.evidence_files else []
             }
         }
     except HTTPException:
@@ -287,7 +293,8 @@ async def update_accident_report(
             "data": {
                 "id": report.id,
                 "verified": report.verified,
-                "description": report.description
+                "description": report.description,
+                "evidence_files": json.loads(report.evidence_files) if report.evidence_files else []
             },
             "message": "Report updated successfully"
         }
@@ -299,22 +306,158 @@ async def update_accident_report(
 
 @router.delete("/{report_id}")
 async def delete_accident_report(report_id: int, db: Session = Depends(get_db)):
-    """Delete an accident report"""
+    """Delete an accident report and associated media files"""
     try:
         report = db.query(AccidentReport).filter(AccidentReport.id == report_id).first()
         
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
         
+        # Delete associated media files
+        if report.evidence_files:
+            try:
+                evidence_list = json.loads(report.evidence_files)
+                for evidence in evidence_list:
+                    filename = evidence.get("filename")
+                    if filename:
+                        file_path = Path(__file__).parent.parent / "media" / "evidence" / filename
+                        if file_path.exists():
+                            file_path.unlink()
+            except json.JSONDecodeError:
+                pass  # If JSON is invalid, just skip file deletion
+        
         db.delete(report)
         db.commit()
         
         return {
             "success": True,
-            "message": "Report deleted successfully"
+            "message": "Report and associated media files deleted successfully"
         }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete report: {str(e)}")
+
+
+# ==================== IMAGE/EVIDENCE UPLOAD ====================
+
+# Create media upload directory if it doesn't exist
+MEDIA_DIR = Path("media/evidence")
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.post("/{report_id}/upload-media")
+async def upload_media(
+    report_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """Upload evidence/media file for a report"""
+    try:
+        # Get the report
+        report = db.query(AccidentReport).filter(AccidentReport.id == report_id).first()
+        
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        # Validate file extension
+        allowed_extensions = {'jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov', 'avi', 'webm'}
+        file_ext = file.filename.split('.')[-1].lower()
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"File type not allowed. Allowed: {allowed_extensions}")
+        
+        # Generate unique filename
+        unique_name = f"{report_id}_{uuid.uuid4().hex}.{file_ext}"
+        file_path = MEDIA_DIR / unique_name
+        
+        # Save file
+        content = await file.read()
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        # Update report with evidence file path
+        evidence_files = []
+        if report.evidence_files:
+            try:
+                evidence_files = json.loads(report.evidence_files)
+            except:
+                evidence_files = []
+        
+        evidence_files.append({
+            'filename': unique_name,
+            'original_name': file.filename,
+            'uploaded_at': datetime.utcnow().isoformat(),
+            'file_type': file_ext,
+            'url': f"/api/reports/{report_id}/media/{unique_name}"
+        })
+        
+        report.evidence_files = json.dumps(evidence_files)
+        db.commit()
+        db.refresh(report)
+        
+        return {
+            "success": True,
+            "data": {
+                "filename": unique_name,
+                "url": f"/api/reports/{report_id}/media/{unique_name}",
+                "file_type": file_ext
+            },
+            "message": "Media uploaded successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to upload media: {str(e)}")
+
+
+@router.get("/{report_id}/media/{filename}")
+async def get_media(report_id: int, filename: str):
+    """Retrieve evidence/media file for a report"""
+    try:
+        file_path = MEDIA_DIR / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Media file not found")
+        
+        # Verify the file belongs to this report
+        if not filename.startswith(f"{report_id}_"):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        from fastapi.responses import FileResponse
+        return FileResponse(file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve media: {str(e)}")
+
+
+@router.get("/{report_id}/evidence")
+async def get_evidence(report_id: int, db: Session = Depends(get_db)):
+    """Get all evidence files for a report"""
+    try:
+        report = db.query(AccidentReport).filter(AccidentReport.id == report_id).first()
+        
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        evidence_files = []
+        if report.evidence_files:
+            try:
+                evidence_files = json.loads(report.evidence_files)
+            except:
+                evidence_files = []
+        
+        return {
+            "success": True,
+            "data": {
+                "report_id": report_id,
+                "evidence_count": len(evidence_files),
+                "files": evidence_files
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch evidence: {str(e)}")

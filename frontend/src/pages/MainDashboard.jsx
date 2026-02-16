@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
-import { AlertTriangle, MapIcon, Route, FileText, Activity, Shield, Search, X, Plus, Bell, MapPin, Clock, Navigation, TrendingUp, CheckCircle, AlertCircle, Eye } from 'lucide-react'
+import { AlertTriangle, MapIcon, Route, FileText, Activity, Shield, Search, X, Plus, Bell, MapPin, Clock, Navigation, TrendingUp, CheckCircle, AlertCircle, Eye, Menu } from 'lucide-react'
 import { useApp } from '../contexts/AppContext'
 import api from '../services/api'
 
@@ -9,6 +9,7 @@ import Navbar from "../components/Common/Navbar";
 import Sidebar from "../components/Common/Sidebar";
 
 import LeafletMap from "../components/Map/LeafletMap";
+import ReportDetailPanel from "../components/Reports/ReportDetailPanel";
 
 
 
@@ -48,6 +49,7 @@ export default function MainDashboard() {
   const [reportLocation, setReportLocation] = useState(null)
   const [riskPrediction, setRiskPrediction] = useState(null)
   const [selectedHotspot, setSelectedHotspot] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [accidentImages, setAccidentImages] = useState({})
 
   // Risk Prediction Handler
@@ -74,12 +76,14 @@ export default function MainDashboard() {
         }))
       }
       
-      await submitAccidentReport(reportData)
-      setShowReportForm(false)
-      setReportLocation(null)
+      const response = await submitAccidentReport(reportData)
+      console.log('Report submitted successfully:', response)
+      // The form will close itself after uploads complete
+      return response
     } catch (error) {
       console.error('Failed to submit report:', error)
       alert('Failed to submit accident report. Please try again.')
+      throw error
     }
   }
   console.log('🔍 MainDashboard Data Check:', {
@@ -90,16 +94,40 @@ export default function MainDashboard() {
     activeTab: activeTab
   })
   return (
-    <div className="flex h-screen bg-gray-900 overflow-hidden">
-     
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        wsConnected={wsConnected} 
-      />
+    <div className="flex h-screen bg-gray-900 overflow-hidden relative">
+      {/* Mobile Hamburger Button */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="md:hidden fixed top-4 left-4 z-50 bg-gray-800 border border-gray-700 rounded-lg p-2 hover:bg-gray-700 transition"
+        title="Toggle Menu"
+      >
+        <Menu size={24} className="text-white" />
+      </button>
+
+      {/* Sidebar Overlay for Mobile */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30 transition-opacity"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div
+        className={`fixed md:static top-0 left-0 h-screen z-40 transform transition-transform duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        <Sidebar 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          wsConnected={wsConnected}
+          onItemClick={() => setSidebarOpen(false)}
+        />
+      </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden w-full">
         {/* Top Navbar */}
         <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -1184,6 +1212,8 @@ function ReportsView({ accidents, accidentImages = {} }) {
   const [notificationSent, setNotificationSent] = useState(false)
   const [analytics, setAnalytics] = useState(null)
   const [notifyingId, setNotifyingId] = useState(null)
+  const [showDetailPanel, setShowDetailPanel] = useState(false)
+  const [selectedReport, setSelectedReport] = useState(null)
   const { submitAccidentReport, addNotification } = useApp()
 
   const filteredAccidents = accidents.filter(acc => {
@@ -1377,6 +1407,15 @@ function ReportsView({ accidents, accidentImages = {} }) {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedReport(accident)
+                          setShowDetailPanel(true)
+                        }}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded transition text-xs"
+                      >
+                        View Evidence
+                      </button>
                       <button
                         onClick={() => handleGenerateReport(accident.id)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded transition text-xs"
@@ -1579,6 +1618,31 @@ function ReportsView({ accidents, accidentImages = {} }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Report Detail Panel with Evidence */}
+      {showDetailPanel && selectedReport && (
+        <ReportDetailPanel 
+          report={selectedReport}
+          onClose={() => {
+            setShowDetailPanel(false)
+            setSelectedReport(null)
+          }}
+          onDelete={async (reportId) => {
+            try {
+              await fetch(`/api/reports/${reportId}`, {
+                method: 'DELETE'
+              })
+              addNotification('Report deleted successfully', 'success')
+              setShowDetailPanel(false)
+              setSelectedReport(null)
+              // Refresh accidents list
+              window.location.reload()
+            } catch (error) {
+              addNotification('Failed to delete report', 'error')
+            }
+          }}
+        />
       )}
     </div>
   )

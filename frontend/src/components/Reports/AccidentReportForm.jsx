@@ -88,42 +88,89 @@ function AccidentReportForm({ location, onClose, onSubmit }) {
     try {
       console.log('Submitting report with images:', imageFiles.length)
       const response = await onSubmit(reportData)
-      const reportId = response?.data?.id
+      console.log('Full report submission response:', JSON.stringify(response, null, 2))
+      console.log('Response type:', typeof response)
+      console.log('Response properties:', Object.keys(response || {}))
+      
+      const reportId = response?.data?.id || response?.id
+      console.log('Extracted reportId:', reportId, 'Type:', typeof reportId)
 
       // Upload media files if any
-      if (mediaFiles.length > 0 && reportId) {
-        setUploading(true)
-        let uploadedCount = 0
-
-        for (let i = 0; i < mediaFiles.length; i++) {
-          const file = mediaFiles[i]
-          const formDataFile = new FormData()
-          formDataFile.append('file', file)
-
-          try {
-            const uploadResponse = await fetch(`/api/reports/${reportId}/upload-media`, {
-              method: 'POST',
-              body: formDataFile
-            })
-
-            if (uploadResponse.ok) {
-              uploadedCount++
-              setUploadProgress(Math.round((uploadedCount / mediaFiles.length) * 100))
+      if (mediaFiles.length > 0) {
+        if (!reportId) {
+          console.error('❌ CRITICAL: No reportId extracted! Cannot upload media files.')
+          console.error('Response structure:', JSON.stringify(response, null, 2))
+          console.error('Expected: response.id or response.data.id')
+          console.error('Possible issue: Backend response format mismatch or submitAccidentReport not returning response')
+          
+          addNotification(
+            'Report created but image upload failed - no report ID received',
+            'warning',
+            {
+              title: '⚠️ Partial Upload',
+              details: 'Report was created but images could not be uploaded. Check browser console for details.',
+              duration: 8000
             }
-          } catch (error) {
-            console.error(`Failed to upload file ${file.name}:`, error)
+          )
+        } else {
+          setUploading(true)
+          let uploadedCount = 0
+          let failedCount = 0
+
+          for (let i = 0; i < mediaFiles.length; i++) {
+            const file = mediaFiles[i]
+            const formDataFile = new FormData()
+            formDataFile.append('file', file)
+
+            try {
+              console.log(`Uploading file ${i + 1}/${mediaFiles.length}: ${file.name} to report ${reportId}`)
+              const uploadResponse = await fetch(`/api/reports/${reportId}/upload-media`, {
+                method: 'POST',
+                body: formDataFile
+              })
+
+              console.log(`Upload response status: ${uploadResponse.status} for ${file.name}`)
+              const uploadData = await uploadResponse.json()
+              console.log(`Upload response data:`, uploadData)
+
+              if (uploadResponse.ok) {
+                uploadedCount++
+                setUploadProgress(Math.round((uploadedCount / mediaFiles.length) * 100))
+              } else {
+                failedCount++
+                console.error(`Upload failed for ${file.name}: ${uploadData.detail || 'Unknown error'}`)
+              }
+            } catch (error) {
+              failedCount++
+              console.error(`Failed to upload file ${file.name}:`, error)
+            }
+          }
+
+          // Show appropriate notification
+          if (uploadedCount > 0) {
+            addNotification(
+              `${uploadedCount}/${mediaFiles.length} media file(s) uploaded successfully`,
+              'success',
+              {
+                title: '📸 Media Uploaded',
+                details: `Your evidence has been attached to the report${failedCount > 0 ? ` (${failedCount} failed)` : ''}`,
+                duration: 6000
+              }
+            )
+          } else if (failedCount > 0) {
+            addNotification(
+              `Failed to upload ${failedCount} media file(s). Please try again.`,
+              'error',
+              {
+                title: '❌ Upload Failed',
+                details: 'Check browser console for details',
+                duration: 8000
+              }
+            )
           }
         }
-
-        addNotification(
-          `${uploadedCount} media file(s) uploaded successfully`,
-          'success',
-          {
-            title: '📸 Media Uploaded',
-            details: `Your evidence has been attached to the report`,
-            duration: 6000
-          }
-        )
+      } else {
+        console.log('✅ No media files to upload')
       }
 
       // Add notification to dashboard
@@ -156,6 +203,11 @@ function AccidentReportForm({ location, onClose, onSubmit }) {
       setTimeout(() => {
         onClose()
       }, 1000)
+
+      // Close form after uploads are done
+      setTimeout(() => {
+        onClose()
+      }, 2000)
     } catch (error) {
       console.error('Failed to submit report:', error)
       addNotification(

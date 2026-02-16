@@ -1,7 +1,7 @@
 import React from 'react'
 import { Activity, MapIcon, Route, AlertTriangle, FileText, Shield, LogOut } from 'lucide-react'
 
-function Sidebar({ activeTab, setActiveTab, wsConnected }) {
+function Sidebar({ activeTab, setActiveTab, wsConnected, onItemClick }) {
   const navItems = [
     { id: 'dashboard', icon: Activity, label: 'Dashboard' },
     { id: 'map', icon: MapIcon, label: 'Live Map' },
@@ -32,7 +32,10 @@ function Sidebar({ activeTab, setActiveTab, wsConnected }) {
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id)
+                onItemClick && onItemClick()
+              }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
                 isActive
                   ? 'bg-blue-600 text-white'

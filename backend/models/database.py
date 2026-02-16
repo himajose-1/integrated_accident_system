@@ -26,6 +26,7 @@ class AccidentReport(Base):
     traffic_density = Column(String)
     reported_at = Column(DateTime, default=datetime.utcnow)
     verified = Column(Boolean, default=False)
+    evidence_files = Column(Text)  # JSON string containing list of evidence file paths
     
 class RiskPrediction(Base):
     """Risk predictions made by Member 1"""
